@@ -126,6 +126,13 @@ export default function FiledRecorder() {
   const [recentId, setRecentId] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
+  // Edit mode state
+  const [editing, setEditing] = useState(false);
+  const [editText, setEditText] = useState('');
+  const [editDateTime, setEditDateTime] = useState('');
+  const [editAttachments, setEditAttachments] = useState([]);
+  const [editSaving, setEditSaving] = useState(false);
+
   const [theta, setTheta] = useState(-0.55);
   const [phi, setPhi] = useState(0.35);
   const [containerWidth, setContainerWidth] = useState(720);
@@ -400,7 +407,83 @@ export default function FiledRecorder() {
       setEntries((prev) => prev.filter((e) => e.id !== id));
       setSelectedEntry(null);
       setConfirmDelete(false);
+      setEditing(false);
     } catch (e) { console.error('Delete failed', e); }
+  }
+
+  function startEdit() {
+    if (!selectedEntry) return;
+    setEditText(selectedEntry.text || '');
+    setEditDateTime(toLocalDateTime(selectedEntry.createdAt));
+    setEditAttachments(selectedEntry.attachments ? [...selectedEntry.attachments] : []);
+    setEditing(true);
+    setConfirmDelete(false);
+  }
+
+  function cancelEdit() {
+    setEditing(false);
+    setEditText('');
+    setEditDateTime('');
+    setEditAttachments([]);
+  }
+
+  function removeEditAttachment(mediaKey) {
+    setEditAttachments((prev) => prev.filter((a) => a.mediaKey !== mediaKey));
+  }
+
+  async function saveEdit() {
+    if (!selectedEntry || editSaving) return;
+    const text = editText.trim();
+    if (!text && editAttachments.length === 0) {
+      alert('error: entry cannot be empty');
+      return;
+    }
+    setEditSaving(true);
+    try {
+      const newCreatedAt = fromLocalDateTime(editDateTime);
+      const original = selectedEntry;
+
+      const removedKeys = (original.attachments || [])
+        .map((a) => a.mediaKey)
+        .filter((k) => !editAttachments.some((a) => a.mediaKey === k));
+
+      for (const key of removedKeys) {
+        try { await window.storage.delete(key); } catch (e) { }
+      }
+
+      const updated = {
+        ...original,
+        text,
+        createdAt: newCreatedAt,
+        attachments: editAttachments,
+      };
+
+      await window.storage.set(original.id, JSON.stringify(updated));
+
+      setEntries((prev) =>
+        prev.map((e) => (e.id === original.id ? updated : e)).sort((a, b) => a.createdAt - b.createdAt)
+      );
+      setSelectedEntry(updated);
+      setEditing(false);
+    } catch (e) {
+      console.error('Edit failed', e);
+      alert('error: edit save failed.');
+    } finally {
+      setEditSaving(false);
+    }
+  }
+
+  function closeModal() {
+    if (editing) {
+      const dirty =
+        editText !== (selectedEntry?.text || '') ||
+        editDateTime !== toLocalDateTime(selectedEntry?.createdAt || 0) ||
+        editAttachments.length !== (selectedEntry?.attachments?.length || 0);
+      if (dirty && !window.confirm('discard unsaved changes?')) return;
+    }
+    setSelectedEntry(null);
+    setConfirmDelete(false);
+    setEditing(false);
   }
 
   function exportAll() {
@@ -1190,11 +1273,11 @@ export default function FiledRecorder() {
       {selectedEntry && (
         <div
           className="filed-overlay"
-          onClick={() => { setSelectedEntry(null); setConfirmDelete(false); }}
+          onClick={closeModal}
           style={{
             position: 'fixed',
             inset: 0,
-            background: 'rgba(10, 10, 12, 0.85)',
+            background: 'rgba(10, 10, 12, 0.3)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -1207,7 +1290,9 @@ export default function FiledRecorder() {
             onClick={(e) => e.stopPropagation()}
             className="filed-modal filed-scrollbar"
             style={{
-              background: '#0E0E10',
+              background: 'rgba(14, 14, 16, 0.5)',
+              backdropFilter: 'blur(10px)',
+              WebkitBackdropFilter: 'blur(10px)',
               border: '0.5px solid #2A2A2E',
               maxWidth: '640px',
               width: '100%',
@@ -1226,16 +1311,31 @@ export default function FiledRecorder() {
               paddingBottom: '12px',
               borderBottom: '0.5px solid #2A2A2E',
               gap: '12px',
+              flexWrap: 'wrap',
             }}>
-              <span style={{
-                fontSize: '11px',
-                color: '#8A877F',
-                letterSpacing: '0.05em',
-              }}>
-                {formatDate(selectedEntry.createdAt)} &nbsp;·&nbsp; {(selectedEntry.text || '').length}c{attachmentSummary(selectedEntry)}
-              </span>
+              {editing ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, flexWrap: 'wrap' }}>
+                  <span style={{ color: '#555248', fontSize: '11px', letterSpacing: '0.05em' }}>
+                    timestamp &gt;
+                  </span>
+                  <input
+                    type="datetime-local"
+                    value={editDateTime}
+                    onChange={(e) => setEditDateTime(e.target.value)}
+                    className="filed-dt"
+                  />
+                </div>
+              ) : (
+                <span style={{
+                  fontSize: '11px',
+                  color: '#8A877F',
+                  letterSpacing: '0.05em',
+                }}>
+                  {formatDate(selectedEntry.createdAt)} &nbsp;·&nbsp; {(selectedEntry.text || '').length}c{attachmentSummary(selectedEntry)}
+                </span>
+              )}
               <button
-                onClick={() => { setSelectedEntry(null); setConfirmDelete(false); }}
+                onClick={closeModal}
                 style={{
                   background: 'transparent',
                   border: 'none',
@@ -1253,31 +1353,89 @@ export default function FiledRecorder() {
               </button>
             </div>
 
-            {selectedEntry.text && (
-              <div style={{
-                fontSize: '13px',
-                lineHeight: 1.85,
-                color: '#D8D5CB',
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
-              }}>
-                {selectedEntry.text}
-              </div>
+            {editing ? (
+              <textarea
+                value={editText}
+                onChange={(e) => setEditText(e.target.value)}
+                placeholder="// (empty)"
+                className="filed-input"
+                onKeyDown={(e) => {
+                  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                    e.preventDefault();
+                    saveEdit();
+                  }
+                }}
+                style={{
+                  width: '100%',
+                  minHeight: '180px',
+                  background: 'rgba(14, 14, 16, 0.5)',
+                  border: '0.5px solid #2A2A2E',
+                  padding: '14px 16px',
+                  fontSize: '13px',
+                  lineHeight: 1.85,
+                  fontFamily: '"JetBrains Mono", monospace',
+                  color: '#D8D5CB',
+                  resize: 'vertical',
+                  outline: 'none',
+                  boxSizing: 'border-box',
+                }}
+                onFocus={(e) => { e.currentTarget.style.borderColor = '#88C0D0'; }}
+                onBlur={(e) => { e.currentTarget.style.borderColor = '#2A2A2E'; }}
+              />
+            ) : (
+              selectedEntry.text && (
+                <div style={{
+                  fontSize: '13px',
+                  lineHeight: 1.85,
+                  color: '#D8D5CB',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                }}>
+                  {selectedEntry.text}
+                </div>
+              )
             )}
 
             {/* Attachments */}
-            {selectedEntry.attachments?.map((att, i) => {
+            {(editing ? editAttachments : selectedEntry.attachments)?.map((att, i) => {
               const data = mediaCache[att.mediaKey];
+              const showSeparator = editing
+                ? (editText || i > 0)
+                : (selectedEntry.text || i > 0);
               return (
-                <div key={i} style={{ marginTop: selectedEntry.text || i > 0 ? '20px' : 0 }}>
+                <div key={att.mediaKey || i} style={{ marginTop: showSeparator ? '20px' : 0 }}>
                   <div style={{
                     color: '#555248',
                     fontSize: '10px',
                     marginBottom: '6px',
                     letterSpacing: '0.04em',
                     wordBreak: 'break-all',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    gap: '8px',
                   }}>
-                    // {att.type}: {att.name} · {formatBytes(att.size || 0)}
+                    <span>// {att.type}: {att.name} · {formatBytes(att.size || 0)}</span>
+                    {editing && (
+                      <button
+                        onClick={() => removeEditAttachment(att.mediaKey)}
+                        style={{
+                          background: '#0E0E10',
+                          border: '0.5px solid #2A2A2E',
+                          color: '#8A877F',
+                          padding: '2px 8px',
+                          fontSize: '10px',
+                          cursor: 'pointer',
+                          fontFamily: 'inherit',
+                          letterSpacing: '0.04em',
+                          flexShrink: 0,
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.color = '#BF616A'; e.currentTarget.style.borderColor = '#BF616A'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.color = '#8A877F'; e.currentTarget.style.borderColor = '#2A2A2E'; }}
+                      >
+                        rm
+                      </button>
+                    )}
                   </div>
                   {data === undefined ? (
                     <div style={{ color: '#555248', fontSize: '11px', padding: '12px 0' }}>
@@ -1296,6 +1454,7 @@ export default function FiledRecorder() {
                         maxHeight: '480px',
                         display: 'block',
                         border: '0.5px solid #2A2A2E',
+                        opacity: editing ? 0.6 : 1,
                       }}
                     />
                   ) : (
@@ -1310,59 +1469,124 @@ export default function FiledRecorder() {
               paddingTop: '12px',
               borderTop: '0.5px solid #2A2A2E',
               display: 'flex',
-              justifyContent: 'flex-end',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              gap: '12px',
+              flexWrap: 'wrap',
             }}>
-              {confirmDelete ? (
-                <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+              {editing ? (
+                <>
+                  <span style={{ color: '#555248', fontSize: '11px', letterSpacing: '0.04em' }}>
+                    {editText.length}c &nbsp;·&nbsp; ⌘+↵ to save
+                  </span>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <button
+                      onClick={cancelEdit}
+                      disabled={editSaving}
+                      style={{
+                        background: 'transparent',
+                        border: '0.5px solid #2A2A2E',
+                        color: '#8A877F',
+                        padding: '6px 14px',
+                        fontSize: '11px',
+                        cursor: editSaving ? 'default' : 'pointer',
+                        fontFamily: 'inherit',
+                        letterSpacing: '0.04em',
+                      }}
+                    >
+                      cancel
+                    </button>
+                    <button
+                      onClick={saveEdit}
+                      disabled={editSaving}
+                      className="filed-btn"
+                      style={{
+                        background: 'transparent',
+                        color: '#88C0D0',
+                        border: '0.5px solid #88C0D0',
+                        padding: '6px 18px',
+                        fontFamily: 'inherit',
+                        fontSize: '11px',
+                        letterSpacing: '0.06em',
+                        cursor: editSaving ? 'default' : 'pointer',
+                      }}
+                    >
+                      {editSaving ? '...' : 'save'}
+                    </button>
+                  </div>
+                </>
+              ) : confirmDelete ? (
+                <>
                   <span style={{ fontSize: '11px', color: '#8A877F' }}>
                     confirm?
                   </span>
-                  <button
-                    onClick={() => setConfirmDelete(false)}
-                    style={{
-                      background: 'transparent',
-                      border: '0.5px solid #2A2A2E',
-                      color: '#8A877F',
-                      padding: '4px 10px',
-                      fontSize: '11px',
-                      cursor: 'pointer',
-                      fontFamily: 'inherit',
-                    }}
-                  >
-                    cancel
-                  </button>
-                  <button
-                    onClick={() => deleteEntry(selectedEntry.id)}
-                    style={{
-                      background: 'transparent',
-                      border: '0.5px solid #BF616A',
-                      color: '#BF616A',
-                      padding: '4px 10px',
-                      fontSize: '11px',
-                      cursor: 'pointer',
-                      fontFamily: 'inherit',
-                    }}
-                  >
-                    rm
-                  </button>
-                </div>
+                  <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                    <button
+                      onClick={() => setConfirmDelete(false)}
+                      style={{
+                        background: 'transparent',
+                        border: '0.5px solid #2A2A2E',
+                        color: '#8A877F',
+                        padding: '4px 10px',
+                        fontSize: '11px',
+                        cursor: 'pointer',
+                        fontFamily: 'inherit',
+                      }}
+                    >
+                      cancel
+                    </button>
+                    <button
+                      onClick={() => deleteEntry(selectedEntry.id)}
+                      style={{
+                        background: 'transparent',
+                        border: '0.5px solid #BF616A',
+                        color: '#BF616A',
+                        padding: '4px 10px',
+                        fontSize: '11px',
+                        cursor: 'pointer',
+                        fontFamily: 'inherit',
+                      }}
+                    >
+                      rm
+                    </button>
+                  </div>
+                </>
               ) : (
-                <button
-                  onClick={() => setConfirmDelete(true)}
-                  style={{
-                    background: 'transparent',
-                    border: 'none',
-                    color: '#555248',
-                    fontSize: '11px',
-                    cursor: 'pointer',
-                    fontFamily: 'inherit',
-                    letterSpacing: '0.04em',
-                  }}
-                  onMouseEnter={(e) => { e.currentTarget.style.color = '#BF616A'; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.color = '#555248'; }}
-                >
-                  rm --this
-                </button>
+                <>
+                  <button
+                    onClick={startEdit}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: '#8A877F',
+                      fontSize: '11px',
+                      cursor: 'pointer',
+                      fontFamily: 'inherit',
+                      letterSpacing: '0.04em',
+                      padding: 0,
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.color = '#88C0D0'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.color = '#8A877F'; }}
+                  >
+                    edit
+                  </button>
+                  <button
+                    onClick={() => setConfirmDelete(true)}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: '#555248',
+                      fontSize: '11px',
+                      cursor: 'pointer',
+                      fontFamily: 'inherit',
+                      letterSpacing: '0.04em',
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.color = '#BF616A'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.color = '#555248'; }}
+                  >
+                    rm --this
+                  </button>
+                </>
               )}
             </div>
           </div>
