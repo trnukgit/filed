@@ -162,6 +162,12 @@ export default function FiledRecorder() {
         margin: 0;
         padding: 0;
         background-color: #0E0E10;
+        overflow-x: hidden;
+      }
+      #root {
+        margin: 0;
+        padding: 0;
+        border: none;
       }
       @keyframes pointAppear {
         0% { opacity: 0; transform: scale(0); }
