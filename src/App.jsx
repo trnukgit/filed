@@ -158,6 +158,11 @@ export default function FiledRecorder() {
   useEffect(() => {
     const style = document.createElement('style');
     style.textContent = `
+      html, body {
+        margin: 0;
+        padding: 0;
+        background-color: #0E0E10;
+      }
       @keyframes pointAppear {
         0% { opacity: 0; transform: scale(0); }
         60% { opacity: 1; transform: scale(2); }
