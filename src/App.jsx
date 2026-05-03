@@ -9,17 +9,11 @@ const supabase = createClient(supabaseUrl, supabaseKey)
 if (!window.storage) {
   window.storage = {
     get: async (key) => {
-      const { data } = await supabase.from('entries').select('value').eq('key', key).maybeSingle()
+      const { data } = await supabase.from('entries').select('value').eq('key', key).single()
       return data ? { value: JSON.stringify(data.value) } : null
     },
     set: async (key, value) => {
-      const { error } = await supabase
-        .from('entries')
-        .upsert({ key, value: JSON.parse(value) }, { onConflict: 'key' })
-      if (error) {
-        console.error('storage.set failed:', error)
-        throw error
-      }
+      await supabase.from('entries').upsert({ key, value: JSON.parse(value) })
     },
     delete: async (key) => {
       await supabase.from('entries').delete().eq('key', key)
@@ -63,19 +57,7 @@ function dataURLSize(dataURL) {
 }
 
 // Language detection: /en path = English locked view
-// Base URL from Vite (e.g. '/' in dev, '/filed/' on GitHub Pages)
-const BASE_URL = (import.meta.env?.BASE_URL || '/').replace(/\/+$/, '/');
-
-// Language detection: pathname ends with /en (with optional trailing slash)
-// Works regardless of whether the app is served from / or /filed/
-const IS_EN = typeof window !== 'undefined' && (() => {
-  const path = window.location.pathname.replace(/\/+$/, ''); // strip trailing slashes
-  return path.endsWith('/en');
-})();
-
-// URL builder: returns '/en/' or '/filed/en/' depending on BASE_URL
-const enUrl = `${BASE_URL}en/`;
-const homeUrl = BASE_URL;
+const IS_EN = typeof window !== 'undefined' && window.location.pathname.replace(/\/$/, '').endsWith('/en');
 
 // UI strings per locale
 const STRINGS = {
@@ -933,7 +915,7 @@ export default function FiledRecorder() {
             gap: '12px',
           }}
         >
-          <div className="filed-header-title" style={{ display: 'flex', alignItems: 'baseline', gap: '12px' }}>
+          <div className="filed-header-title" style={{ display: 'flex', alignItems: 'baseline', gap: '12px', flexShrink: 1, minWidth: 0 }}>
             <span style={{ color: '#88C0D0', fontSize: '13px' }}>$</span>
             <h1 style={{
               fontSize: '15px',
@@ -948,7 +930,7 @@ export default function FiledRecorder() {
               — a record of unweighed observations
             </span>
           </div>
-          <div className="filed-header-meta" style={{ display: 'flex', alignItems: 'center', gap: '14px', fontSize: '11px', flexWrap: 'wrap' }}>
+          <div className="filed-header-meta" style={{ display: 'flex', alignItems: 'center', gap: '14px', fontSize: '11px', flexWrap: 'wrap', justifyContent: 'flex-end', marginLeft: 'auto' }}>
             <span style={{ color: '#8A877F' }}>
               [ {entries.length} {entries.length === 1 ? T.entry : T.entries} ]
             </span>
@@ -992,7 +974,7 @@ export default function FiledRecorder() {
             </button>
             {!IS_EN && (
               <a
-                href={enUrl}
+                href="/en/"
                 style={{
                   color: '#88C0D0',
                   textDecoration: 'none',
