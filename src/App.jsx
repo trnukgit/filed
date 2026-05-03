@@ -526,6 +526,8 @@ export default function FiledRecorder() {
   }, []);
 
   // Background translation: PRIMARY -> SECONDARY
+  // Race condition guard: re-fetch entry just before writing,
+  // so we don't clobber any edits the user made while translation was in flight.
   async function translateAndSave(entry) {
     const primaryText = entry[PRIMARY];
     if (!primaryText?.trim()) return;
@@ -533,7 +535,26 @@ export default function FiledRecorder() {
     setTranslatingIds((prev) => new Set(prev).add(entry.id));
     try {
       const translated = await TRANSLATE_FN(primaryText);
-      const updated = { ...entry, [SECONDARY]: translated };
+
+      // Re-fetch the latest version of the entry from storage.
+      // The user may have edited it (changed date, attachments, etc.)
+      // while we were waiting on the translation API.
+      let latest;
+      try {
+        const r = await window.storage.get(entry.id);
+        latest = r ? JSON.parse(r.value) : null;
+      } catch {
+        latest = null;
+      }
+
+      // If the entry was deleted while translating, abort.
+      if (!latest) return;
+
+      // If the user changed the primary text in the meantime,
+      // this translation is stale — don't write it.
+      if ((latest[PRIMARY] || '') !== primaryText) return;
+
+      const updated = { ...latest, [SECONDARY]: translated };
       await window.storage.set(entry.id, JSON.stringify(updated));
       setEntries((prev) =>
         prev.map((e) => (e.id === entry.id ? updated : e)).sort((a, b) => a.createdAt - b.createdAt)
@@ -623,7 +644,7 @@ export default function FiledRecorder() {
       const updated = {
         ...original,
         [PRIMARY]: text,
-        [SECONDARY]: textChanged ? undefined : original[SECONDARY],
+        [SECONDARY]: textChanged ? '' : (original[SECONDARY] || ''),
         createdAt: newCreatedAt,
         attachments: editAttachments,
       };
