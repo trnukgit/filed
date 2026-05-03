@@ -56,6 +56,140 @@ function dataURLSize(dataURL) {
   return Math.ceil(base64.length * 0.75);
 }
 
+// Language detection: /en path = English locked view
+// const IS_EN = typeof window !== 'undefined' && window.location.pathname.replace(/\/$/, '').endsWith('/en');
+const IS_EN = typeof window !== 'undefined' && window.location.hash.includes('/en');
+
+// UI strings per locale
+const STRINGS = {
+  ja: {
+    tagline: '— a record of unweighed observations',
+    entry: 'entry',
+    entries: 'entries',
+    placeholder: "// what's there. a friction, a fragment, someone's offhand remark.",
+    empty: '// empty',
+    emptyHint: 'file your first observation below',
+    timestamp: 'timestamp >',
+    commit: 'commit',
+    commitHint: '⌘+↵ to commit',
+    save: 'save',
+    saveHint: '⌘+↵ to save',
+    cancel: 'cancel',
+    confirm: 'confirm?',
+    edit: 'edit',
+    rmThis: 'rm --this',
+    rm: 'rm',
+    now: 'now',
+    addImg: '+ img',
+    addAud: '+ aud',
+    exportMd: 'export.md',
+    settings: '[settings]',
+    enLink: '[en →]',
+    translatePending: '// (translation pending)',
+    translateAll: 'translate pending',
+    translating: 'translating',
+  },
+  en: {
+    tagline: '— a record of unweighed observations',
+    entry: 'entry',
+    entries: 'entries',
+    placeholder: "// what's there. a friction, a fragment, someone's offhand remark.",
+    empty: '// empty',
+    emptyHint: 'no entries yet',
+    timestamp: 'timestamp >',
+    commit: 'commit',
+    commitHint: '⌘+↵ to commit',
+    save: 'save',
+    saveHint: '⌘+↵ to save',
+    cancel: 'cancel',
+    confirm: 'confirm?',
+    edit: 'edit',
+    rmThis: 'rm --this',
+    rm: 'rm',
+    now: 'now',
+    addImg: '+ img',
+    addAud: '+ aud',
+    exportMd: 'export.md',
+    settings: '[settings]',
+    enLink: '',
+    translatePending: '// (translation pending)',
+    translateAll: 'translate pending',
+    translating: 'translating',
+  },
+};
+const T = IS_EN ? STRINGS.en : STRINGS.ja;
+
+const API_KEY_STORAGE = 'filed_anthropic_api_key';
+
+async function translateToEnglish(text) {
+  if (!text || !text.trim()) return '';
+  const key = localStorage.getItem(API_KEY_STORAGE);
+  if (!key) throw new Error('NO_API_KEY');
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': key,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body: JSON.stringify({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 4096,
+      messages: [{
+        role: 'user',
+        content: `Translate the following Japanese journal entry to natural, fluent English. Preserve the tone exactly — including any informal, fragmentary, thinking-aloud, or unfinished quality. Do not smooth out incomplete thoughts. Do not add commentary, headings, or explanation. Output ONLY the translation, nothing else.\n\n---\n${text}`,
+      }],
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`HTTP ${res.status}: ${err.slice(0, 200)}`);
+  }
+  const data = await res.json();
+  const out = data?.content?.[0]?.text;
+  if (!out) throw new Error('Empty response');
+  return out.trim();
+}
+
+async function translateToJapanese(text) {
+  if (!text || !text.trim()) return '';
+  const key = localStorage.getItem(API_KEY_STORAGE);
+  if (!key) throw new Error('NO_API_KEY');
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': key,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body: JSON.stringify({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 4096,
+      messages: [{
+        role: 'user',
+        content: `Translate the following English journal entry to natural, casual Japanese (use 普通体, not 丁寧体). Preserve the tone exactly — including any informal, fragmentary, thinking-aloud, or unfinished quality. Do not smooth out incomplete thoughts. Do not add commentary, headings, or explanation. Output ONLY the translation, nothing else.\n\n---\n${text}`,
+      }],
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`HTTP ${res.status}: ${err.slice(0, 200)}`);
+  }
+  const data = await res.json();
+  const out = data?.content?.[0]?.text;
+  if (!out) throw new Error('Empty response');
+  return out.trim();
+}
+
+// Field mapping based on current locale.
+// PRIMARY = field for the current view's content
+// SECONDARY = the translated counterpart
+const PRIMARY = IS_EN ? 'textEn' : 'text';
+const SECONDARY = IS_EN ? 'text' : 'textEn';
+const TRANSLATE_FN = IS_EN ? translateToJapanese : translateToEnglish;
+
 async function compressImage(file, maxDim = 1280, quality = 0.78) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -133,6 +267,13 @@ export default function FiledRecorder() {
   const [editAttachments, setEditAttachments] = useState([]);
   const [editSaving, setEditSaving] = useState(false);
 
+  // Translation state
+  const [showSettings, setShowSettings] = useState(false);
+  const [apiKeyInput, setApiKeyInput] = useState('');
+  const [hasApiKey, setHasApiKey] = useState(false);
+  const [translatingIds, setTranslatingIds] = useState(new Set());
+  const [bulkTranslating, setBulkTranslating] = useState(false);
+
   const [theta, setTheta] = useState(-0.55);
   const [phi, setPhi] = useState(0.35);
   const [containerWidth, setContainerWidth] = useState(720);
@@ -143,6 +284,66 @@ export default function FiledRecorder() {
   const dragRef = useRef(null);
   const imageInputRef = useRef(null);
   const audioInputRef = useRef(null);
+
+  // Initialize API key state from localStorage
+  useEffect(() => {
+    const stored = localStorage.getItem(API_KEY_STORAGE) || '';
+    setHasApiKey(stored.length > 0);
+    setApiKeyInput(stored);
+  }, []);
+
+  // Background translation: translates PRIMARY → SECONDARY field
+  async function translateAndSave(entry) {
+    const primaryText = entry[PRIMARY];
+    if (!primaryText?.trim()) return;
+    if (!localStorage.getItem(API_KEY_STORAGE)) return;
+    setTranslatingIds((prev) => new Set(prev).add(entry.id));
+    try {
+      const translated = await TRANSLATE_FN(primaryText);
+      const updated = { ...entry, [SECONDARY]: translated };
+      await window.storage.set(entry.id, JSON.stringify(updated));
+      setEntries((prev) =>
+        prev.map((e) => (e.id === entry.id ? updated : e)).sort((a, b) => a.createdAt - b.createdAt)
+      );
+      setSelectedEntry((prev) => (prev?.id === entry.id ? updated : prev));
+    } catch (e) {
+      console.error('Translation failed for', entry.id, e);
+    } finally {
+      setTranslatingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(entry.id);
+        return next;
+      });
+    }
+  }
+
+  // Translate all pending entries (those with PRIMARY but missing SECONDARY)
+  async function translateAllPending() {
+    if (bulkTranslating) return;
+    if (!localStorage.getItem(API_KEY_STORAGE)) {
+      setShowSettings(true);
+      return;
+    }
+    const pending = entries.filter((e) => e[PRIMARY]?.trim() && !e[SECONDARY]);
+    if (pending.length === 0) return;
+    setBulkTranslating(true);
+    for (const entry of pending) {
+      await translateAndSave(entry);
+    }
+    setBulkTranslating(false);
+  }
+
+  function saveApiKey() {
+    const trimmed = apiKeyInput.trim();
+    if (trimmed) {
+      localStorage.setItem(API_KEY_STORAGE, trimmed);
+      setHasApiKey(true);
+    } else {
+      localStorage.removeItem(API_KEY_STORAGE);
+      setHasApiKey(false);
+    }
+    setShowSettings(false);
+  }
 
   // Detect mobile
   useEffect(() => {
@@ -376,7 +577,13 @@ export default function FiledRecorder() {
         setMediaCache((prev) => ({ ...prev, [mediaKey]: att.dataURL }));
       }
 
-      const entry = { id, text, createdAt: ms, attachments };
+      const entry = {
+        id,
+        [PRIMARY]: text,
+        [SECONDARY]: '',
+        createdAt: ms,
+        attachments,
+      };
       await window.storage.set(id, JSON.stringify(entry));
 
       setEntries((prev) => [...prev, entry].sort((a, b) => a.createdAt - b.createdAt));
@@ -385,6 +592,9 @@ export default function FiledRecorder() {
       setCustomDateTime(toLocalDateTime(Date.now()));
       setRecentId(id);
       setTimeout(() => setRecentId(null), 2000);
+
+      // Background translation (fire and forget)
+      if (text) translateAndSave(entry);
     } catch (e) {
       console.error('Save failed', e);
       alert('error: save failed. try again.');
@@ -413,7 +623,7 @@ export default function FiledRecorder() {
 
   function startEdit() {
     if (!selectedEntry) return;
-    setEditText(selectedEntry.text || '');
+    setEditText(selectedEntry[PRIMARY] || '');
     setEditDateTime(toLocalDateTime(selectedEntry.createdAt));
     setEditAttachments(selectedEntry.attachments ? [...selectedEntry.attachments] : []);
     setEditing(true);
@@ -451,9 +661,14 @@ export default function FiledRecorder() {
         try { await window.storage.delete(key); } catch (e) { }
       }
 
+      const oldPrimary = original[PRIMARY] || '';
+      const textChanged = text !== oldPrimary;
+
       const updated = {
         ...original,
-        text,
+        [PRIMARY]: text,
+        // If primary text changed, invalidate the existing translation
+        [SECONDARY]: textChanged ? undefined : original[SECONDARY],
         createdAt: newCreatedAt,
         attachments: editAttachments,
       };
@@ -465,6 +680,9 @@ export default function FiledRecorder() {
       );
       setSelectedEntry(updated);
       setEditing(false);
+
+      // Re-translate if primary text changed
+      if (textChanged && text) translateAndSave(updated);
     } catch (e) {
       console.error('Edit failed', e);
       alert('error: edit save failed.');
@@ -476,7 +694,7 @@ export default function FiledRecorder() {
   function closeModal() {
     if (editing) {
       const dirty =
-        editText !== (selectedEntry?.text || '') ||
+        editText !== (selectedEntry?.[PRIMARY] || '') ||
         editDateTime !== toLocalDateTime(selectedEntry?.createdAt || 0) ||
         editAttachments.length !== (selectedEntry?.attachments?.length || 0);
       if (dirty && !window.confirm('discard unsaved changes?')) return;
@@ -491,7 +709,8 @@ export default function FiledRecorder() {
     const md = entries
       .map((e) => {
         let s = `## ${formatDate(e.createdAt)}\n\n`;
-        if (e.text) s += `${e.text}\n\n`;
+        const body = e[PRIMARY] || '';
+        if (body) s += `${body}\n\n`;
         if (e.attachments?.length) {
           for (const a of e.attachments) {
             s += `[${a.type}: ${a.name} · ${formatBytes(a.size || 0)}]\n`;
@@ -582,7 +801,7 @@ export default function FiledRecorder() {
     const endMs = Math.max(today.getTime(), entries[entries.length - 1].createdAt);
     const totalDays = Math.max(Math.ceil((endMs - startMs) / 86400000), 7);
 
-    const lengths = entries.map((e) => (e.text || '').length);
+    const lengths = entries.map((e) => (e[PRIMARY] || '').length);
     const minLen = Math.min(...lengths);
     const maxLen = Math.max(...lengths);
     const lenRange = maxLen - minLen;
@@ -593,7 +812,7 @@ export default function FiledRecorder() {
       const hour = d.getHours() + d.getMinutes() / 60 + d.getSeconds() / 3600;
       const xN = totalDays > 1 ? dayIdx / totalDays : 0.5;
       const yN = 1 - hour / 24;
-      const zN = lenRange > 0 ? ((e.text || '').length - minLen) / lenRange : 0.5;
+      const zN = lenRange > 0 ? ((e[PRIMARY] || '').length - minLen) / lenRange : 0.5;
       const monthIdx = Math.min(Math.floor(dayIdx / 30), 2);
 
       const proj = project3D(xN, yN, zN, theta, phi);
@@ -736,10 +955,67 @@ export default function FiledRecorder() {
               — a record of unweighed observations
             </span>
           </div>
-          <div className="filed-header-meta" style={{ display: 'flex', alignItems: 'center', gap: '14px', fontSize: '11px' }}>
+          <div className="filed-header-meta" style={{ display: 'flex', alignItems: 'center', gap: '14px', fontSize: '11px', flexWrap: 'wrap' }}>
             <span style={{ color: '#8A877F' }}>
-              [ {entries.length} {entries.length === 1 ? 'entry' : 'entries'} ]
+              [ {entries.length} {entries.length === 1 ? T.entry : T.entries} ]
             </span>
+            {entries.some((e) => e[PRIMARY]?.trim() && !e[SECONDARY]) && (
+              <button
+                onClick={translateAllPending}
+                disabled={bulkTranslating}
+                className="filed-btn-ghost"
+                style={{
+                  background: 'transparent',
+                  border: '0.5px solid #2A2A2E',
+                  color: bulkTranslating ? '#555248' : '#88C0D0',
+                  padding: '5px 10px',
+                  fontFamily: 'inherit',
+                  fontSize: '11px',
+                  cursor: bulkTranslating ? 'default' : 'pointer',
+                  letterSpacing: '0.04em',
+                  borderColor: bulkTranslating ? '#2A2A2E' : '#88C0D0',
+                }}
+              >
+                {bulkTranslating ? `${T.translating}…` : T.translateAll}
+              </button>
+            )}
+            <button
+              onClick={() => setShowSettings(true)}
+              className="filed-btn-ghost"
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: '#555248',
+                padding: '5px 4px',
+                fontFamily: 'inherit',
+                fontSize: '11px',
+                cursor: 'pointer',
+                letterSpacing: '0.04em',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.color = '#D8D5CB'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.color = '#555248'; }}
+            >
+              [settings]
+            </button>
+            {!IS_EN && (
+              <a
+                href="/en"
+                style={{
+                  color: '#88C0D0',
+                  textDecoration: 'none',
+                  fontFamily: 'inherit',
+                  fontSize: '11px',
+                  letterSpacing: '0.04em',
+                  border: '0.5px solid #2A2A2E',
+                  padding: '5px 10px',
+                  transition: 'all 0.15s',
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#88C0D0'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#2A2A2E'; }}
+              >
+                [en →]
+              </a>
+            )}
             {entries.length > 0 && (
               <button
                 onClick={exportAll}
@@ -755,7 +1031,7 @@ export default function FiledRecorder() {
                   letterSpacing: '0.04em',
                 }}
               >
-                export.md
+                {T.exportMd}
               </button>
             )}
           </div>
@@ -1013,7 +1289,7 @@ export default function FiledRecorder() {
               }}
             >
               <div style={{ color: '#555248', marginBottom: '6px', letterSpacing: '0.04em' }}>
-                {formatDate(hoveredEntry.createdAt)} &nbsp;·&nbsp; {(hoveredEntry.text || '').length}c{attachmentSummary(hoveredEntry)}
+                {formatDate(hoveredEntry.createdAt)} &nbsp;·&nbsp; {(hoveredEntry[PRIMARY] || '').length}c{attachmentSummary(hoveredEntry)}
               </div>
               <div style={{
                 color: '#A8A59B',
@@ -1023,7 +1299,7 @@ export default function FiledRecorder() {
                 WebkitBoxOrient: 'vertical',
                 overflow: 'hidden',
               }}>
-                {hoveredEntry.text || <span style={{ color: '#555248', fontStyle: 'italic' }}>// no text</span>}
+                {hoveredEntry[PRIMARY] || (hoveredEntry[SECONDARY] ? <span style={{ color: '#555248', fontStyle: 'italic' }}>{T.translatePending}</span> : <span style={{ color: '#555248', fontStyle: 'italic' }}>// no text</span>)}
               </div>
             </div>
           )}
@@ -1290,7 +1566,7 @@ export default function FiledRecorder() {
             onClick={(e) => e.stopPropagation()}
             className="filed-modal filed-scrollbar"
             style={{
-              background: 'rgba(14, 14, 16, 0.5)',
+              background: 'rgba(14, 14, 16, 0.8)',
               backdropFilter: 'blur(10px)',
               WebkitBackdropFilter: 'blur(10px)',
               border: '0.5px solid #2A2A2E',
@@ -1331,7 +1607,7 @@ export default function FiledRecorder() {
                   color: '#8A877F',
                   letterSpacing: '0.05em',
                 }}>
-                  {formatDate(selectedEntry.createdAt)} &nbsp;·&nbsp; {(selectedEntry.text || '').length}c{attachmentSummary(selectedEntry)}
+                  {formatDate(selectedEntry.createdAt)} &nbsp;·&nbsp; {(selectedEntry[PRIMARY] || '').length}c{attachmentSummary(selectedEntry)}
                 </span>
               )}
               <button
@@ -1383,17 +1659,40 @@ export default function FiledRecorder() {
                 onBlur={(e) => { e.currentTarget.style.borderColor = '#2A2A2E'; }}
               />
             ) : (
-              selectedEntry.text && (
-                <div style={{
-                  fontSize: '13px',
-                  lineHeight: 1.85,
-                  color: '#D8D5CB',
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-word',
-                }}>
-                  {selectedEntry.text}
-                </div>
-              )
+              (() => {
+                const primary = selectedEntry[PRIMARY];
+                const secondary = selectedEntry[SECONDARY];
+                if (primary) {
+                  return (
+                    <div style={{
+                      fontSize: '13px',
+                      lineHeight: 1.85,
+                      color: '#D8D5CB',
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word',
+                    }}>
+                      {primary}
+                    </div>
+                  );
+                }
+                if (secondary) {
+                  // primary missing but secondary exists = translation pending
+                  const isTranslating = translatingIds.has(selectedEntry.id);
+                  return (
+                    <div style={{
+                      fontSize: '12px',
+                      lineHeight: 1.7,
+                      color: '#555248',
+                      fontStyle: 'italic',
+                    }}>
+                      {isTranslating ? (
+                        <>{T.translating}<span className="filed-cursor">_</span></>
+                      ) : T.translatePending}
+                    </div>
+                  );
+                }
+                return null;
+              })()
             )}
 
             {/* Attachments */}
@@ -1401,7 +1700,7 @@ export default function FiledRecorder() {
               const data = mediaCache[att.mediaKey];
               const showSeparator = editing
                 ? (editText || i > 0)
-                : (selectedEntry.text || i > 0);
+                : (selectedEntry[PRIMARY] || selectedEntry[SECONDARY] || i > 0);
               return (
                 <div key={att.mediaKey || i} style={{ marginTop: showSeparator ? '20px' : 0 }}>
                   <div style={{
@@ -1588,6 +1887,141 @@ export default function FiledRecorder() {
                   </button>
                 </>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Settings Modal */}
+      {showSettings && (
+        <div
+          onClick={() => setShowSettings(false)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(10, 10, 12, 0.4)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '24px',
+            zIndex: 200,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: 'rgba(14, 14, 16, 0.92)',
+              backdropFilter: 'blur(10px)',
+              WebkitBackdropFilter: 'blur(10px)',
+              border: '0.5px solid #2A2A2E',
+              maxWidth: '480px',
+              width: '100%',
+              padding: '24px 28px',
+              fontFamily: '"JetBrains Mono", monospace',
+              color: '#D8D5CB',
+            }}
+          >
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: '16px',
+              paddingBottom: '10px',
+              borderBottom: '0.5px solid #2A2A2E',
+            }}>
+              <span style={{ fontSize: '12px', color: '#D8D5CB', letterSpacing: '0.06em' }}>
+                $ settings
+              </span>
+              <button
+                onClick={() => setShowSettings(false)}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#555248',
+                  fontSize: '14px',
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                  padding: 0,
+                  lineHeight: 1,
+                }}
+              >
+                [x]
+              </button>
+            </div>
+
+            <div style={{ marginBottom: '16px' }}>
+              <div style={{ color: '#8A877F', fontSize: '11px', marginBottom: '8px', letterSpacing: '0.04em' }}>
+                anthropic api key
+              </div>
+              <div style={{ color: '#555248', fontSize: '10px', marginBottom: '10px', lineHeight: 1.6 }}>
+                used to translate japanese entries into english on /en.<br />
+                stored only in this browser's localStorage. never sent anywhere except the anthropic api.
+              </div>
+              <input
+                type="password"
+                value={apiKeyInput}
+                onChange={(e) => setApiKeyInput(e.target.value)}
+                placeholder="sk-ant-..."
+                style={{
+                  width: '100%',
+                  background: 'rgba(14, 14, 16, 0.6)',
+                  border: '0.5px solid #2A2A2E',
+                  padding: '8px 10px',
+                  fontSize: '12px',
+                  fontFamily: '"JetBrains Mono", monospace',
+                  color: '#D8D5CB',
+                  outline: 'none',
+                  boxSizing: 'border-box',
+                }}
+                onFocus={(e) => { e.currentTarget.style.borderColor = '#88C0D0'; }}
+                onBlur={(e) => { e.currentTarget.style.borderColor = '#2A2A2E'; }}
+              />
+              <div style={{
+                color: hasApiKey ? '#A3BE8C' : '#555248',
+                fontSize: '10px',
+                marginTop: '6px',
+                letterSpacing: '0.04em',
+              }}>
+                status: {hasApiKey ? 'configured' : 'not set'}
+              </div>
+            </div>
+
+            <div style={{
+              display: 'flex',
+              justifyContent: 'flex-end',
+              gap: '8px',
+              paddingTop: '12px',
+              borderTop: '0.5px solid #2A2A2E',
+            }}>
+              <button
+                onClick={() => setShowSettings(false)}
+                style={{
+                  background: '#0E0E10',
+                  border: '0.5px solid #2A2A2E',
+                  color: '#8A877F',
+                  padding: '6px 14px',
+                  fontSize: '11px',
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                }}
+              >
+                cancel
+              </button>
+              <button
+                onClick={saveApiKey}
+                style={{
+                  background: '#0E0E10',
+                  color: '#88C0D0',
+                  border: '0.5px solid #88C0D0',
+                  padding: '6px 18px',
+                  fontFamily: 'inherit',
+                  fontSize: '11px',
+                  letterSpacing: '0.06em',
+                  cursor: 'pointer',
+                }}
+              >
+                save
+              </button>
             </div>
           </div>
         </div>
