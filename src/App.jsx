@@ -999,7 +999,7 @@ export default function FiledRecorder() {
             </button>
             {!IS_EN && (
               <a
-                href="/en"
+                href="#/en"
                 style={{
                   color: '#88C0D0',
                   textDecoration: 'none',
