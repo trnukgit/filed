@@ -62,55 +62,15 @@ const IS_EN = typeof window !== 'undefined' && window.location.pathname.replace(
 // UI strings per locale
 const STRINGS = {
   ja: {
-    tagline: '— a record of unweighed observations',
     entry: 'entry',
     entries: 'entries',
-    placeholder: "// what's there. a friction, a fragment, someone's offhand remark.",
-    empty: '// empty',
-    emptyHint: 'file your first observation below',
-    timestamp: 'timestamp >',
-    commit: 'commit',
-    commitHint: '⌘+↵ to commit',
-    save: 'save',
-    saveHint: '⌘+↵ to save',
-    cancel: 'cancel',
-    confirm: 'confirm?',
-    edit: 'edit',
-    rmThis: 'rm --this',
-    rm: 'rm',
-    now: 'now',
-    addImg: '+ img',
-    addAud: '+ aud',
-    exportMd: 'export.md',
-    settings: '[settings]',
-    enLink: '[en →]',
     translatePending: '// (translation pending)',
     translateAll: 'translate pending',
     translating: 'translating',
   },
   en: {
-    tagline: '— a record of unweighed observations',
     entry: 'entry',
     entries: 'entries',
-    placeholder: "// what's there. a friction, a fragment, someone's offhand remark.",
-    empty: '// empty',
-    emptyHint: 'no entries yet',
-    timestamp: 'timestamp >',
-    commit: 'commit',
-    commitHint: '⌘+↵ to commit',
-    save: 'save',
-    saveHint: '⌘+↵ to save',
-    cancel: 'cancel',
-    confirm: 'confirm?',
-    edit: 'edit',
-    rmThis: 'rm --this',
-    rm: 'rm',
-    now: 'now',
-    addImg: '+ img',
-    addAud: '+ aud',
-    exportMd: 'export.md',
-    settings: '[settings]',
-    enLink: '',
     translatePending: '// (translation pending)',
     translateAll: 'translate pending',
     translating: 'translating',
@@ -133,8 +93,7 @@ async function translateToEnglish(text) {
       'anthropic-dangerous-direct-browser-access': 'true',
     },
     body: JSON.stringify({
-      // model: 'claude-haiku-4-5-20251001',
-      model: 'claude-3-5-haiku-20241022',
+      model: 'claude-haiku-4-5-20251001',
       max_tokens: 4096,
       messages: [{
         role: 'user',
@@ -165,8 +124,7 @@ async function translateToJapanese(text) {
       'anthropic-dangerous-direct-browser-access': 'true',
     },
     body: JSON.stringify({
-      // model: 'claude-haiku-4-5-20251001',
-      model: 'claude-3-5-haiku-20241022',
+      model: 'claude-haiku-4-5-20251001',
       max_tokens: 4096,
       messages: [{
         role: 'user',
@@ -184,9 +142,7 @@ async function translateToJapanese(text) {
   return out.trim();
 }
 
-// Field mapping based on current locale.
-// PRIMARY = field for the current view's content
-// SECONDARY = the translated counterpart
+// Field mapping based on current locale
 const PRIMARY = IS_EN ? 'textEn' : 'text';
 const SECONDARY = IS_EN ? 'text' : 'textEn';
 const TRANSLATE_FN = IS_EN ? translateToJapanese : translateToEnglish;
@@ -285,66 +241,6 @@ export default function FiledRecorder() {
   const dragRef = useRef(null);
   const imageInputRef = useRef(null);
   const audioInputRef = useRef(null);
-
-  // Initialize API key state from localStorage
-  useEffect(() => {
-    const stored = localStorage.getItem(API_KEY_STORAGE) || '';
-    setHasApiKey(stored.length > 0);
-    setApiKeyInput(stored);
-  }, []);
-
-  // Background translation: translates PRIMARY → SECONDARY field
-  async function translateAndSave(entry) {
-    const primaryText = entry[PRIMARY];
-    if (!primaryText?.trim()) return;
-    if (!localStorage.getItem(API_KEY_STORAGE)) return;
-    setTranslatingIds((prev) => new Set(prev).add(entry.id));
-    try {
-      const translated = await TRANSLATE_FN(primaryText);
-      const updated = { ...entry, [SECONDARY]: translated };
-      await window.storage.set(entry.id, JSON.stringify(updated));
-      setEntries((prev) =>
-        prev.map((e) => (e.id === entry.id ? updated : e)).sort((a, b) => a.createdAt - b.createdAt)
-      );
-      setSelectedEntry((prev) => (prev?.id === entry.id ? updated : prev));
-    } catch (e) {
-      console.error('Translation failed for', entry.id, e);
-    } finally {
-      setTranslatingIds((prev) => {
-        const next = new Set(prev);
-        next.delete(entry.id);
-        return next;
-      });
-    }
-  }
-
-  // Translate all pending entries (those with PRIMARY but missing SECONDARY)
-  async function translateAllPending() {
-    if (bulkTranslating) return;
-    if (!localStorage.getItem(API_KEY_STORAGE)) {
-      setShowSettings(true);
-      return;
-    }
-    const pending = entries.filter((e) => e[PRIMARY]?.trim() && !e[SECONDARY]);
-    if (pending.length === 0) return;
-    setBulkTranslating(true);
-    for (const entry of pending) {
-      await translateAndSave(entry);
-    }
-    setBulkTranslating(false);
-  }
-
-  function saveApiKey() {
-    const trimmed = apiKeyInput.trim();
-    if (trimmed) {
-      localStorage.setItem(API_KEY_STORAGE, trimmed);
-      setHasApiKey(true);
-    } else {
-      localStorage.removeItem(API_KEY_STORAGE);
-      setHasApiKey(false);
-    }
-    setShowSettings(false);
-  }
 
   // Detect mobile
   useEffect(() => {
@@ -622,6 +518,65 @@ export default function FiledRecorder() {
     } catch (e) { console.error('Delete failed', e); }
   }
 
+  // Initialize API key state
+  useEffect(() => {
+    const stored = localStorage.getItem(API_KEY_STORAGE) || '';
+    setHasApiKey(stored.length > 0);
+    setApiKeyInput(stored);
+  }, []);
+
+  // Background translation: PRIMARY -> SECONDARY
+  async function translateAndSave(entry) {
+    const primaryText = entry[PRIMARY];
+    if (!primaryText?.trim()) return;
+    if (!localStorage.getItem(API_KEY_STORAGE)) return;
+    setTranslatingIds((prev) => new Set(prev).add(entry.id));
+    try {
+      const translated = await TRANSLATE_FN(primaryText);
+      const updated = { ...entry, [SECONDARY]: translated };
+      await window.storage.set(entry.id, JSON.stringify(updated));
+      setEntries((prev) =>
+        prev.map((e) => (e.id === entry.id ? updated : e)).sort((a, b) => a.createdAt - b.createdAt)
+      );
+      setSelectedEntry((prev) => (prev?.id === entry.id ? updated : prev));
+    } catch (e) {
+      console.error('Translation failed for', entry.id, e);
+    } finally {
+      setTranslatingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(entry.id);
+        return next;
+      });
+    }
+  }
+
+  async function translateAllPending() {
+    if (bulkTranslating) return;
+    if (!localStorage.getItem(API_KEY_STORAGE)) {
+      setShowSettings(true);
+      return;
+    }
+    const pending = entries.filter((e) => e[PRIMARY]?.trim() && !e[SECONDARY]);
+    if (pending.length === 0) return;
+    setBulkTranslating(true);
+    for (const entry of pending) {
+      await translateAndSave(entry);
+    }
+    setBulkTranslating(false);
+  }
+
+  function saveApiKey() {
+    const trimmed = apiKeyInput.trim();
+    if (trimmed) {
+      localStorage.setItem(API_KEY_STORAGE, trimmed);
+      setHasApiKey(true);
+    } else {
+      localStorage.removeItem(API_KEY_STORAGE);
+      setHasApiKey(false);
+    }
+    setShowSettings(false);
+  }
+
   function startEdit() {
     if (!selectedEntry) return;
     setEditText(selectedEntry[PRIMARY] || '');
@@ -668,7 +623,6 @@ export default function FiledRecorder() {
       const updated = {
         ...original,
         [PRIMARY]: text,
-        // If primary text changed, invalidate the existing translation
         [SECONDARY]: textChanged ? undefined : original[SECONDARY],
         createdAt: newCreatedAt,
         attachments: editAttachments,
@@ -682,7 +636,6 @@ export default function FiledRecorder() {
       setSelectedEntry(updated);
       setEditing(false);
 
-      // Re-translate if primary text changed
       if (textChanged && text) translateAndSave(updated);
     } catch (e) {
       console.error('Edit failed', e);
@@ -967,14 +920,14 @@ export default function FiledRecorder() {
                 className="filed-btn-ghost"
                 style={{
                   background: 'transparent',
-                  border: '0.5px solid #2A2A2E',
+                  border: '0.5px solid',
+                  borderColor: bulkTranslating ? '#2A2A2E' : '#88C0D0',
                   color: bulkTranslating ? '#555248' : '#88C0D0',
                   padding: '5px 10px',
                   fontFamily: 'inherit',
                   fontSize: '11px',
                   cursor: bulkTranslating ? 'default' : 'pointer',
                   letterSpacing: '0.04em',
-                  borderColor: bulkTranslating ? '#2A2A2E' : '#88C0D0',
                 }}
               >
                 {bulkTranslating ? `${T.translating}…` : T.translateAll}
@@ -1000,7 +953,7 @@ export default function FiledRecorder() {
             </button>
             {!IS_EN && (
               <a
-                href="/en"
+                href="/en/"
                 style={{
                   color: '#88C0D0',
                   textDecoration: 'none',
@@ -1032,7 +985,7 @@ export default function FiledRecorder() {
                   letterSpacing: '0.04em',
                 }}
               >
-                {T.exportMd}
+                export.md
               </button>
             )}
           </div>
@@ -1554,7 +1507,7 @@ export default function FiledRecorder() {
           style={{
             position: 'fixed',
             inset: 0,
-            background: 'rgba(10, 10, 12, 0.2)',
+            background: 'rgba(10, 10, 12, 0.3)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -1567,7 +1520,7 @@ export default function FiledRecorder() {
             onClick={(e) => e.stopPropagation()}
             className="filed-modal filed-scrollbar"
             style={{
-              background: 'rgba(14, 14, 16, 0.8)',
+              background: 'rgba(14, 14, 16, 0.5)',
               backdropFilter: 'blur(10px)',
               WebkitBackdropFilter: 'blur(10px)',
               border: '0.5px solid #2A2A2E',
@@ -1677,7 +1630,6 @@ export default function FiledRecorder() {
                   );
                 }
                 if (secondary) {
-                  // primary missing but secondary exists = translation pending
                   const isTranslating = translatingIds.has(selectedEntry.id);
                   return (
                     <div style={{
@@ -1892,6 +1844,7 @@ export default function FiledRecorder() {
           </div>
         </div>
       )}
+
       {/* Settings Modal */}
       {showSettings && (
         <div
@@ -1955,7 +1908,7 @@ export default function FiledRecorder() {
                 anthropic api key
               </div>
               <div style={{ color: '#555248', fontSize: '10px', marginBottom: '10px', lineHeight: 1.6 }}>
-                used to translate japanese entries into english on /en.<br />
+                used to translate entries between japanese and english.<br />
                 stored only in this browser's localStorage. never sent anywhere except the anthropic api.
               </div>
               <input
