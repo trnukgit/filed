@@ -57,8 +57,7 @@ function dataURLSize(dataURL) {
 }
 
 // Language detection: /en path = English locked view
-// const IS_EN = typeof window !== 'undefined' && window.location.pathname.replace(/\/$/, '').endsWith('/en');
-const IS_EN = typeof window !== 'undefined' && window.location.hash.includes('/en');
+const IS_EN = typeof window !== 'undefined' && window.location.pathname.replace(/\/$/, '').endsWith('/en');
 
 // UI strings per locale
 const STRINGS = {
@@ -134,7 +133,8 @@ async function translateToEnglish(text) {
       'anthropic-dangerous-direct-browser-access': 'true',
     },
     body: JSON.stringify({
-      model: 'claude-haiku-4-5-20251001',
+      // model: 'claude-haiku-4-5-20251001',
+      model: 'claude-3-5-haiku-20241022',
       max_tokens: 4096,
       messages: [{
         role: 'user',
@@ -165,7 +165,8 @@ async function translateToJapanese(text) {
       'anthropic-dangerous-direct-browser-access': 'true',
     },
     body: JSON.stringify({
-      model: 'claude-haiku-4-5-20251001',
+      // model: 'claude-haiku-4-5-20251001',
+      model: 'claude-3-5-haiku-20241022',
       max_tokens: 4096,
       messages: [{
         role: 'user',
@@ -999,7 +1000,7 @@ export default function FiledRecorder() {
             </button>
             {!IS_EN && (
               <a
-                href="#/en"
+                href="/en"
                 style={{
                   color: '#88C0D0',
                   textDecoration: 'none',
@@ -1553,7 +1554,7 @@ export default function FiledRecorder() {
           style={{
             position: 'fixed',
             inset: 0,
-            background: 'rgba(10, 10, 12, 0.3)',
+            background: 'rgba(10, 10, 12, 0.2)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
