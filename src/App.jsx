@@ -9,11 +9,17 @@ const supabase = createClient(supabaseUrl, supabaseKey)
 if (!window.storage) {
   window.storage = {
     get: async (key) => {
-      const { data } = await supabase.from('entries').select('value').eq('key', key).single()
+      const { data } = await supabase.from('entries').select('value').eq('key', key).maybeSingle()
       return data ? { value: JSON.stringify(data.value) } : null
     },
     set: async (key, value) => {
-      await supabase.from('entries').upsert({ key, value: JSON.parse(value) })
+      const { error } = await supabase
+        .from('entries')
+        .upsert({ key, value: JSON.parse(value) }, { onConflict: 'key' })
+      if (error) {
+        console.error('storage.set failed:', error)
+        throw error
+      }
     },
     delete: async (key) => {
       await supabase.from('entries').delete().eq('key', key)
@@ -57,7 +63,19 @@ function dataURLSize(dataURL) {
 }
 
 // Language detection: /en path = English locked view
-const IS_EN = typeof window !== 'undefined' && window.location.pathname.replace(/\/$/, '').endsWith('/en');
+// Base URL from Vite (e.g. '/' in dev, '/filed/' on GitHub Pages)
+const BASE_URL = (import.meta.env?.BASE_URL || '/').replace(/\/+$/, '/');
+
+// Language detection: pathname ends with /en (with optional trailing slash)
+// Works regardless of whether the app is served from / or /filed/
+const IS_EN = typeof window !== 'undefined' && (() => {
+  const path = window.location.pathname.replace(/\/+$/, ''); // strip trailing slashes
+  return path.endsWith('/en');
+})();
+
+// URL builder: returns '/en/' or '/filed/en/' depending on BASE_URL
+const enUrl = `${BASE_URL}en/`;
+const homeUrl = BASE_URL;
 
 // UI strings per locale
 const STRINGS = {
@@ -974,7 +992,7 @@ export default function FiledRecorder() {
             </button>
             {!IS_EN && (
               <a
-                href="/en/"
+                href={enUrl}
                 style={{
                   color: '#88C0D0',
                   textDecoration: 'none',
