@@ -57,7 +57,18 @@ function dataURLSize(dataURL) {
 }
 
 // Language detection: /en path = English locked view
-const IS_EN = typeof window !== 'undefined' && window.location.pathname.replace(/\/$/, '').endsWith('/en');
+// Base URL from Vite (e.g. '/' in dev, '/filed/' on GitHub Pages)
+const BASE_URL = (import.meta.env?.BASE_URL || '/').replace(/\/+$/, '/');
+
+// Language detection: pathname ends with /en (with optional trailing slash)
+// Works regardless of whether the app is served from / or /filed/
+const IS_EN = typeof window !== 'undefined' && (() => {
+  const path = window.location.pathname.replace(/\/+$/, '');
+  return path.endsWith('/en');
+})();
+
+// URL builder: returns '/en/' or '/filed/en/' depending on BASE_URL
+const enUrl = `${BASE_URL}en/`;
 
 // UI strings per locale
 const STRINGS = {
@@ -974,7 +985,7 @@ export default function FiledRecorder() {
             </button>
             {!IS_EN && (
               <a
-                href="/en/"
+                href={enUrl}
                 style={{
                   color: '#88C0D0',
                   textDecoration: 'none',
@@ -1191,7 +1202,7 @@ export default function FiledRecorder() {
               {plotData.points.map((p) => {
                 const isHover = hoveredId === p.id;
                 const isRecent = recentId === p.id;
-                const baseR = 0.6 + p.factor * 1.2;
+                const baseR = 3 + p.factor * 2;
                 const r = isHover ? baseR + 2.5 : baseR;
                 const opacity = Math.max(0.4, Math.min(1, p.factor * 0.9));
                 const hasAttach = p.attachments?.length > 0;
