@@ -1202,7 +1202,7 @@ export default function FiledRecorder() {
               {plotData.points.map((p) => {
                 const isHover = hoveredId === p.id;
                 const isRecent = recentId === p.id;
-                const baseR = 3 + p.factor * 2;
+                const baseR = 0.6 + p.factor * 1.2;
                 const r = isHover ? baseR + 2.5 : baseR;
                 const opacity = Math.max(0.4, Math.min(1, p.factor * 0.9));
                 const hasAttach = p.attachments?.length > 0;
