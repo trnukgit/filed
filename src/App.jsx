@@ -9,11 +9,17 @@ const supabase = createClient(supabaseUrl, supabaseKey)
 if (!window.storage) {
   window.storage = {
     get: async (key) => {
-      const { data } = await supabase.from('entries').select('value').eq('key', key).single()
+      const { data } = await supabase.from('entries').select('value').eq('key', key).maybeSingle()
       return data ? { value: JSON.stringify(data.value) } : null
     },
     set: async (key, value) => {
-      await supabase.from('entries').upsert({ key, value: JSON.parse(value) })
+      const { error } = await supabase
+        .from('entries')
+        .upsert({ key, value: JSON.parse(value) }, { onConflict: 'key' })
+      if (error) {
+        console.error('storage.set failed:', error)
+        throw error
+      }
     },
     delete: async (key) => {
       await supabase.from('entries').delete().eq('key', key)
@@ -915,7 +921,7 @@ export default function FiledRecorder() {
             gap: '12px',
           }}
         >
-          <div className="filed-header-title" style={{ display: 'flex', alignItems: 'baseline', gap: '12px', flexShrink: 1, minWidth: 0 }}>
+          <div className="filed-header-title" style={{ display: 'flex', alignItems: 'baseline', gap: '12px' }}>
             <span style={{ color: '#88C0D0', fontSize: '13px' }}>$</span>
             <h1 style={{
               fontSize: '15px',
@@ -930,7 +936,7 @@ export default function FiledRecorder() {
               — a record of unweighed observations
             </span>
           </div>
-          <div className="filed-header-meta" style={{ display: 'flex', alignItems: 'center', gap: '14px', fontSize: '11px', flexWrap: 'wrap', justifyContent: 'flex-end', marginLeft: 'auto' }}>
+          <div className="filed-header-meta" style={{ display: 'flex', alignItems: 'center', gap: '14px', fontSize: '11px', flexWrap: 'wrap' }}>
             <span style={{ color: '#8A877F' }}>
               [ {entries.length} {entries.length === 1 ? T.entry : T.entries} ]
             </span>
@@ -1191,7 +1197,7 @@ export default function FiledRecorder() {
               {plotData.points.map((p) => {
                 const isHover = hoveredId === p.id;
                 const isRecent = recentId === p.id;
-                const baseR = 0.7 + p.factor * 1.2;
+                const baseR = 3 + p.factor * 2;
                 const r = isHover ? baseR + 2.5 : baseR;
                 const opacity = Math.max(0.4, Math.min(1, p.factor * 0.9));
                 const hasAttach = p.attachments?.length > 0;
