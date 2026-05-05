@@ -9,17 +9,11 @@ const supabase = createClient(supabaseUrl, supabaseKey)
 if (!window.storage) {
   window.storage = {
     get: async (key) => {
-      const { data } = await supabase.from('entries').select('value').eq('key', key).maybeSingle()
+      const { data } = await supabase.from('entries').select('value').eq('key', key).single()
       return data ? { value: JSON.stringify(data.value) } : null
     },
     set: async (key, value) => {
-      const { error } = await supabase
-        .from('entries')
-        .upsert({ key, value: JSON.parse(value) }, { onConflict: 'key' })
-      if (error) {
-        console.error('storage.set failed:', error)
-        throw error
-      }
+      await supabase.from('entries').upsert({ key, value: JSON.parse(value) })
     },
     delete: async (key) => {
       await supabase.from('entries').delete().eq('key', key)
